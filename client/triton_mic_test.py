@@ -47,7 +47,7 @@ class TritonVADClient:
             self.context = audio[-self.CONTEXT_SIZE:].copy()
 
             audio_input = audio_with_context.reshape(1, -1)
-            sr_input = np.array(16000, dtype=np.int64)
+            sr_input = np.array([16000], dtype=np.int64)
 
             inputs = [
                 grpcclient.InferInput("input", audio_input.shape, "FP32"),

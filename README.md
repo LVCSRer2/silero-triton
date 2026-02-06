@@ -16,6 +16,7 @@ silero_triton/
 ├── client/
 │   ├── real_mic_30_clients.py            # 실제 마이크 + N개 동시 부하 테스트
 │   ├── triton_mic_test.py                # Triton gRPC 마이크 부하 테스트
+│   ├── benchmark_tcp_vs_triton.py        # TCP vs Triton 벤치마크
 │   ├── simulate_multi_mic_test.py        # 시뮬레이션 부하 테스트
 │   ├── tcp_multi_mic_client.py           # TCP 마이크 클라이언트
 │   ├── multi_mic_client.py               # Triton gRPC 멀티 마이크 클라이언트
@@ -71,6 +72,9 @@ python client/triton_mic_test.py --num-clients 30
 # 시뮬레이션 부하 테스트
 python client/simulate_multi_mic_test.py --num-clients 100 --duration 10
 
+# TCP vs Triton 벤치마크 (마이크 불필요)
+python client/benchmark_tcp_vs_triton.py --num-clients 10 --duration 10
+
 # 오디오 장치 확인
 python client/real_mic_30_clients.py --list-devices
 ```
@@ -88,7 +92,19 @@ python client/real_mic_30_clients.py --list-devices
 
 ## 성능 테스트 결과 (CPU)
 
-### 실제 마이크 동시 부하 테스트: TCP 서버 vs Triton Server
+### 벤치마크: TCP vs Triton (시뮬레이션, 10초)
+
+`benchmark_tcp_vs_triton.py`로 측정. 마이크 없이 시뮬레이션 오디오 사용, Silero VAD v5 context 포함.
+
+| 지표 | TCP (ONNX Runtime) | Triton gRPC | 차이 |
+|------|-------------------|-------------|------|
+| **총 추론 (10 클라이언트)** | 13,401 | 7,227 | |
+| **처리량** | 1,340 infer/s | 723 infer/s | -46% |
+| **평균 레이턴시** | 6.85ms | 10.18ms | +49% |
+| **P50 레이턴시** | 5.75ms | 9.31ms | |
+| **P95 레이턴시** | 16.13ms | 18.94ms | |
+
+### 실제 마이크 동시 부하 테스트
 
 마이크 1개의 오디오를 N개 클라이언트 모두에게 복제하여 동시에 서버로 전송하는 방식입니다.
 실시간 처리 기준은 32ms 미만 (512 samples @ 16kHz).
@@ -113,11 +129,8 @@ python client/real_mic_30_clients.py --list-devices
 
 ### 분석
 
-- **실시간 처리 한계**: TCP 서버 기준 약 **50개** 동시 마이크 입력
-- **TCP 서버가 Triton보다 빠른 이유**:
-  - Silero VAD는 매우 가벼운 모델 (~2ms 추론)
-  - gRPC 직렬화/역직렬화 오버헤드가 추론 시간보다 큼
-  - Docker 컨테이너 네트워크 계층의 추가 지연
+- **TCP가 ~1.9배 빠름**: Silero VAD는 매우 가벼운 모델 (~2ms 추론)이라 gRPC 오버헤드가 추론 시간보다 큼
+- **실시간 처리 한계**: TCP 서버 기준 약 **50개** 동시 마이크 입력 (32ms 이내)
 - **Triton이 유리한 경우**: 추론 시간이 긴 모델 (ASR, LLM 등)에서 배칭/멀티인스턴스 효과가 프로토콜 오버헤드를 상회
 
 ## 라이선스
