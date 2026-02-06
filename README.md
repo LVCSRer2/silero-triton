@@ -1,6 +1,6 @@
 # Silero VAD Triton Inference Server
 
-Silero VAD 모델을 NVIDIA Triton Inference Server에서 서빙하고, 10개의 마이크 입력을 동시에 처리하는 클라이언트입니다.
+Silero VAD 모델을 ONNX Runtime 기반 서버에서 서빙하고, 다수의 마이크 입력을 동시에 처리하는 클라이언트입니다.
 
 ## 구조
 
@@ -9,89 +9,108 @@ silero_triton/
 ├── model_repository/
 │   └── silero_vad/
 │       ├── 1/
-│       │   └── model.onnx          # Silero VAD ONNX 모델
-│       └── config.pbtxt            # Triton 모델 설정
+│       │   └── model.onnx                # Silero VAD ONNX 모델
+│       └── config.pbtxt                  # Triton 모델 설정
+├── server/
+│   └── onnx_vad_server.py                # ONNX Runtime TCP 서버
 ├── client/
-│   ├── multi_mic_client.py         # 동기식 멀티 마이크 클라이언트
-│   └── async_multi_mic_client.py   # 비동기식 멀티 마이크 클라이언트
-├── download_model.py               # 모델 다운로드 스크립트
-├── docker-compose.yml              # Triton 서버 Docker 설정
-├── requirements.txt                # Python 의존성
+│   ├── real_mic_30_clients.py            # 실제 마이크 + 다중 클라이언트
+│   ├── simulate_multi_mic_test.py        # 시뮬레이션 부하 테스트
+│   ├── tcp_multi_mic_client.py           # TCP 마이크 클라이언트
+│   ├── multi_mic_client.py               # Triton gRPC 멀티 마이크 클라이언트
+│   └── async_multi_mic_client.py         # Triton gRPC 비동기 클라이언트
+├── download_model.py                     # 모델 다운로드 (torch 불필요)
+├── docker-compose.yml                    # Triton 서버 Docker 설정
+├── requirements.txt
 └── README.md
 ```
 
 ## 설치 및 실행
 
-### 1. 환경 설정
+### 1. 의존성 설치
 
 ```bash
-# Python 가상환경 생성
-python -m venv venv
-source venv/bin/activate
-
-# 의존성 설치
 pip install -r requirements.txt
+
+# 마이크 사용 시 PortAudio 필요
+sudo apt-get install -y libportaudio2 portaudio19-dev
 ```
 
-### 2. Silero VAD 모델 다운로드
+필요 패키지: `onnxruntime`, `numpy`, `sounddevice`, `tritonclient[grpc]`, `scipy`
+
+> torch 의존성 없음
+
+### 2. 모델 다운로드
 
 ```bash
 python download_model.py
 ```
 
-### 3. Triton 서버 시작
+GitHub에서 Silero VAD ONNX 모델을 직접 다운로드합니다.
+
+### 3. 서버 실행
 
 ```bash
-# Docker Compose로 Triton 서버 시작
-docker-compose up -d
+# ONNX Runtime TCP 서버 (Docker 불필요)
+python server/onnx_vad_server.py --port 8001
 
-# 로그 확인
-docker-compose logs -f
+# 또는 Docker로 Triton 서버 실행
+docker-compose up -d
 ```
 
 ### 4. 클라이언트 실행
 
 ```bash
-# 동기식 클라이언트 (스레드 기반)
-python client/multi_mic_client.py --num-mics 10
+# 실제 마이크 + 30개 동시 클라이언트
+python client/real_mic_30_clients.py --num-clients 30
 
-# 비동기식 클라이언트 (asyncio 기반, 더 높은 성능)
-python client/async_multi_mic_client.py --num-mics 10
+# 시뮬레이션 부하 테스트
+python client/simulate_multi_mic_test.py --num-clients 100 --duration 10
 
-# 사용 가능한 오디오 장치 확인
-python client/multi_mic_client.py --list-devices
+# 오디오 장치 확인
+python client/real_mic_30_clients.py --list-devices
 ```
 
 ## 클라이언트 옵션
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--url` | localhost:8001 | Triton gRPC 서버 URL |
-| `--num-mics` | 10 | 동시 처리할 마이크 수 |
-| `--sample-rate` | 16000 | 오디오 샘플링 레이트 |
-| `--list-devices` | - | 사용 가능한 오디오 장치 목록 출력 |
+| `--host` | localhost | 서버 호스트 |
+| `--port` | 8001 | 서버 포트 |
+| `--num-clients` | 30 | 동시 처리할 클라이언트 수 |
+| `--device` | 기본 장치 | 마이크 장치 인덱스 |
+| `--duration` | 무제한 | 테스트 시간(초) |
+| `--list-devices` | - | 오디오 장치 목록 출력 |
+
+## 성능 테스트 결과 (CPU)
+
+### 실제 마이크 입력 테스트
+
+| 동시 클라이언트 | 평균 레이턴시 | 상태 |
+|---------------|-------------|------|
+| 30 | 1.72ms | ✅ |
+| 50 | 1.86ms | ✅ |
+| 100 | 1.96ms | ✅ |
+| 200 | 2.03ms | ✅ |
+| 500 | 1.90ms | ✅ |
+| 1000 | 2.30ms | ✅ |
+
+### 시뮬레이션 부하 테스트
+
+| 동시 클라이언트 | 평균 레이턴시 | 처리량 |
+|---------------|-------------|--------|
+| 10 | 1.36ms | 300/s |
+| 50 | 14.55ms | 1,401/s |
+| 100 | 61.37ms | 1,385/s |
+| 200 | 123.31ms | 1,253/s |
 
 ## Triton 모델 설정
 
 `config.pbtxt` 주요 설정:
 
-- **platform**: `onnxruntime_onnx` (ONNX Runtime 사용)
-- **instance_group**: GPU에서 2개 인스턴스 실행
+- **platform**: `onnxruntime_onnx` (ONNX Runtime)
+- **instance_group**: CPU에서 4개 인스턴스 실행
 - **dynamic_batching**: 동적 배칭으로 처리량 최적화
-- **TensorRT 최적화**: FP16 정밀도로 추론 가속
-
-## 성능 최적화
-
-1. **동적 배칭**: 여러 요청을 배치로 묶어 처리량 향상
-2. **TensorRT**: ONNX 모델을 TensorRT로 최적화
-3. **비동기 클라이언트**: asyncio로 I/O 대기 시간 최소화
-4. **멀티 인스턴스**: GPU에서 여러 모델 인스턴스 실행
-
-## 실제 환경 적용 시 주의사항
-
-1. **다중 마이크 장치**: 실제 환경에서는 각 마이크에 다른 device_index 지정 필요
-2. **네트워크 지연**: 원격 서버 사용 시 gRPC 스트리밍 고려
-3. **메모리 관리**: 장시간 운영 시 메모리 모니터링 필요
 
 ## 라이선스
 
