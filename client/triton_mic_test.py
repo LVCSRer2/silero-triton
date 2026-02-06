@@ -28,16 +28,26 @@ class ClientStats:
 class TritonVADClient:
     """Triton gRPC VAD 클라이언트"""
 
+    CONTEXT_SIZE = 64  # Silero VAD v5: 16kHz에서 context 64 샘플
+
     def __init__(self, client_id: int, url: str = "localhost:9001"):
         self.client_id = client_id
         self.url = url
         self.client = grpcclient.InferenceServerClient(url=url)
         self.state = np.zeros((2, 1, 128), dtype=np.float32)
+        self.context = np.zeros(self.CONTEXT_SIZE, dtype=np.float32)
 
     def infer(self, audio: np.ndarray) -> Optional[float]:
         try:
-            audio_input = audio.reshape(1, -1).astype(np.float32)
-            sr_input = np.array([16000], dtype=np.int64)
+            audio = audio.flatten().astype(np.float32)
+            audio = np.clip(audio, -1.0, 1.0)
+
+            # Silero VAD v5: context 붙이기 (512 → 576)
+            audio_with_context = np.concatenate([self.context, audio])
+            self.context = audio[-self.CONTEXT_SIZE:].copy()
+
+            audio_input = audio_with_context.reshape(1, -1)
+            sr_input = np.array(16000, dtype=np.int64)
 
             inputs = [
                 grpcclient.InferInput("input", audio_input.shape, "FP32"),
@@ -90,6 +100,7 @@ class TritonMicTest:
 
     def _audio_callback(self, indata, frames, time_info, status):
         audio = indata[:, 0].copy() if indata.ndim > 1 else indata.flatten().copy()
+        audio = np.clip(audio, -1.0, 1.0)
         for q in self.client_queues:
             try:
                 q.put_nowait(audio)

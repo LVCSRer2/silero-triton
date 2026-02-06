@@ -106,6 +106,9 @@ class RealMicMultiClient:
 
         audio = indata[:, 0].copy() if indata.ndim > 1 else indata.flatten().copy()
 
+        # 오디오를 [-1, 1] 범위로 클램핑 (마이크 게인 과다 방지)
+        audio = np.clip(audio, -1.0, 1.0)
+
         # 모든 클라이언트 큐에 동일한 오디오 넣기
         for q in self.client_queues:
             try:

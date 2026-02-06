@@ -17,9 +17,12 @@ from typing import Dict, Tuple
 
 class VADSession:
     """개별 클라이언트의 VAD 세션 상태"""
-    def __init__(self, state_shape=(2, 1, 128)):
+    def __init__(self, state_shape=(2, 1, 128), context_size=64):
         # Silero VAD v5의 state 형태
         self.state = np.zeros(state_shape, dtype=np.float32)
+        # Silero VAD v5는 이전 청크의 마지막 context_size 샘플을 현재 청크 앞에 붙여야 함
+        self.context = np.zeros(context_size, dtype=np.float32)
+        self.context_size = context_size
         self.last_access = time.time()
 
 
@@ -87,18 +90,29 @@ class SileroVADServer:
             session.last_access = time.time()
             return session
 
-    def infer(self, audio: np.ndarray, state: np.ndarray) -> Tuple[float, np.ndarray]:
-        """VAD 추론 - Silero VAD v5 인터페이스"""
+    def infer(self, audio: np.ndarray, session: 'VADSession') -> Tuple[float, np.ndarray]:
+        """VAD 추론 - Silero VAD v5 인터페이스 (context 포함)"""
+        audio = audio.flatten().astype(np.float32)
+
+        # 오디오를 [-1, 1] 범위로 클램핑
+        audio = np.clip(audio, -1.0, 1.0)
+
+        # Silero VAD v5: 이전 context를 현재 청크 앞에 붙임 (512 → 576)
+        audio_with_context = np.concatenate([session.context, audio])
+
+        # 다음 추론을 위해 현재 청크의 마지막 context_size 샘플 저장
+        session.context = audio[-session.context_size:].copy()
+
         # 입력 준비
-        audio = audio.reshape(1, -1).astype(np.float32)
-        sr = np.array([16000], dtype=np.int64)
+        audio_input = audio_with_context.reshape(1, -1)
+        sr = np.array(16000, dtype=np.int64)
 
         # 추론
         outputs = self.session.run(
             self.output_names,
             {
-                'input': audio,
-                'state': state,
+                'input': audio_input,
+                'state': session.state,
                 'sr': sr
             }
         )
@@ -112,7 +126,7 @@ class SileroVADServer:
     def infer_with_session(self, session_id: str, audio: np.ndarray) -> float:
         """세션 기반 추론 (상태 자동 관리)"""
         session = self.get_or_create_session(session_id)
-        prob, session.state = self.infer(audio, session.state)
+        prob, session.state = self.infer(audio, session)
         return prob
 
 
