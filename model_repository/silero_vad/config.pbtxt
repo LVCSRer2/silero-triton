@@ -1,0 +1,56 @@
+name: "silero_vad"
+platform: "onnxruntime_onnx"
+max_batch_size: 0
+
+input [
+  {
+    name: "input"
+    data_type: TYPE_FP32
+    dims: [ -1, -1 ]  # [batch, samples]
+  },
+  {
+    name: "sr"
+    data_type: TYPE_INT64
+    dims: [ 1 ]
+  },
+  {
+    name: "h"
+    data_type: TYPE_FP32
+    dims: [ 2, -1, 64 ]  # LSTM hidden state
+  },
+  {
+    name: "c"
+    data_type: TYPE_FP32
+    dims: [ 2, -1, 64 ]  # LSTM cell state
+  }
+]
+
+output [
+  {
+    name: "output"
+    data_type: TYPE_FP32
+    dims: [ -1, 1 ]  # speech probability
+  },
+  {
+    name: "hn"
+    data_type: TYPE_FP32
+    dims: [ 2, -1, 64 ]
+  },
+  {
+    name: "cn"
+    data_type: TYPE_FP32
+    dims: [ 2, -1, 64 ]
+  }
+]
+
+instance_group [
+  {
+    count: 4
+    kind: KIND_CPU
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 4, 8 ]
+  max_queue_delay_microseconds: 100
+}

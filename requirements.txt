@@ -1,0 +1,14 @@
+# Triton Client
+tritonclient[all]>=2.40.0
+
+# Audio processing
+numpy>=1.24.0
+sounddevice>=0.4.6
+scipy>=1.11.0
+
+# Model download
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Utilities
+asyncio-compat>=0.1.0
